@@ -1,5 +1,5 @@
 """
-VSL Model Trainer - Train model đơn giản và nhanh
+VSL Model Trainer - Phiên bản tự động quét thư mục
 """
 
 import numpy as np
@@ -9,43 +9,77 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 import os
 import glob
-import json
 
-def load_data(dataset_dir='../data/raw'):
-    """Load data từ folder"""
+def load_data(dataset_dir):
+    """Load data bằng cách quét toàn bộ thư mục"""
     X, y = [], []
     
-    # Load metadata
-    metadata_path = os.path.join(dataset_dir, 'metadata.json')
-    if os.path.exists(metadata_path):
-        with open(metadata_path, 'r', encoding='utf-8') as f:
-            metadata = json.load(f)
-        print(f"Found {len(metadata['signs'])} signs: {list(metadata['signs'].keys())}")
+    print(f"📂 Đang quét data tại: {dataset_dir}")
     
-    # Load data
-    for sign_name in os.listdir(dataset_dir):
+    if not os.path.exists(dataset_dir):
+        print(f"❌ Lỗi: Không tìm thấy thư mục {dataset_dir}")
+        return np.array([]), np.array([])
+
+    # Lấy danh sách tất cả các folder con
+    folders = [f for f in os.listdir(dataset_dir) if os.path.isdir(os.path.join(dataset_dir, f))]
+    
+    if not folders:
+        print("❌ Không tìm thấy folder nào trong data/raw!")
+        return np.array([]), np.array([])
+
+    print(f"🔍 Tìm thấy {len(folders)} thư mục nhãn: {folders}")
+
+    count_per_label = {}
+
+    for sign_name in folders:
         sign_path = os.path.join(dataset_dir, sign_name)
         
-        if not os.path.isdir(sign_path):
-            continue
-        
+        # Tìm tất cả file .npy trong folder đó
         sample_files = glob.glob(os.path.join(sign_path, '*.npy'))
         
+        if len(sample_files) == 0:
+            print(f"⚠️ Cảnh báo: Folder '{sign_name}' bị rỗng, bỏ qua.")
+            continue
+            
         for sample_file in sample_files:
-            sequence = np.load(sample_file)
-            X.append(sequence)
-            y.append(sign_name)
-        
-        print(f"  ✓ {sign_name}: {len(sample_files)} samples")
-    
+            try:
+                sequence = np.load(sample_file)
+                # Kiểm tra shape để đảm bảo data không bị lỗi
+                if sequence.shape == (30, 126): 
+                    X.append(sequence)
+                    y.append(sign_name)
+                else:
+                    print(f"⚠️ Bỏ qua file lỗi shape {sequence.shape}: {sample_file}")
+            except Exception as e:
+                print(f"❌ Lỗi đọc file {sample_file}: {e}")
+
+        count_per_label[sign_name] = len(sample_files)
+        # print(f"   + {sign_name}: {len(sample_files)} mẫu") # Bỏ comment nếu muốn log dài
+
+    print("\n📊 Thống kê dữ liệu:")
+    for label, count in count_per_label.items():
+        print(f"   - {label}: {count} mẫu")
+
     return np.array(X), np.array(y)
 
 def build_model(sequence_length, n_features, n_classes):
     """Build simple LSTM model"""
     model = keras.Sequential([
-        keras.layers.LSTM(64, input_shape=(sequence_length, n_features)),
-        keras.layers.Dropout(0.3),
+        keras.layers.Input(shape=(sequence_length, n_features)),
+        
+        # LSTM Layer 1
+        keras.layers.LSTM(64, return_sequences=True),
+        keras.layers.Dropout(0.2),
+        
+        # LSTM Layer 2
+        keras.layers.LSTM(128, return_sequences=False),
+        keras.layers.Dropout(0.2),
+        
+        # Dense Layers
+        keras.layers.Dense(64, activation='relu'),
         keras.layers.Dense(32, activation='relu'),
+        
+        # Output Layer
         keras.layers.Dense(n_classes, activation='softmax')
     ])
     
@@ -59,81 +93,90 @@ def build_model(sequence_length, n_features, n_classes):
 
 def main():
     print("\n" + "="*50)
-    print("VSL MODEL TRAINER")
+    print("VSL MODEL TRAINER (AUTO SCAN)")
     print("="*50)
     
-    # 1. Load data
-    print("\n[1/4] Loading data...")
-    X, y = load_data(dataset_dir='../data/raw')
-    print(f"✓ Loaded {len(X)} samples")
+    # 1. Xác định đường dẫn chuẩn (Absolute Path)
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    dataset_dir = os.path.join(current_dir, '../data/raw') # Trỏ ra folder data/raw
+    models_dir = os.path.join(current_dir, '../models')
     
-    # 2. Encode labels
+    # 2. Load data
+    print("\n[1/4] Loading data...")
+    X, y = load_data(dataset_dir)
+    
+    if len(X) == 0:
+        print("\n❌ KHÔNG CÓ DATA ĐỂ TRAIN! Vui lòng chạy auto_collect_data.py trước.")
+        return
+
+    print(f"\n✅ Tổng cộng: {len(X)} mẫu")
+    
+    # 3. Encode labels
     print("\n[2/4] Encoding labels...")
     label_encoder = LabelEncoder()
     y_encoded = label_encoder.fit_transform(y)
-    print(f"✓ Classes: {label_encoder.classes_}")
     
-    # 3. Split data
+    classes = label_encoder.classes_
+    print(f"✅ Đã mã hóa {len(classes)} nhãn: {classes}")
+    
+    # 4. Split data
+    # Stratify giúp chia đều các nhãn trong tập train và test
     X_train, X_test, y_train, y_test = train_test_split(
         X, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded
     )
-    print(f"✓ Train: {len(X_train)}, Test: {len(X_test)}")
+    print(f"✓ Train set: {len(X_train)} samples")
+    print(f"✓ Test set:  {len(X_test)} samples")
     
-    # 4. Build model
+    # 5. Build model
     print("\n[3/4] Building model...")
     model = build_model(
         sequence_length=X.shape[1],
         n_features=X.shape[2],
-        n_classes=len(label_encoder.classes_)
+        n_classes=len(classes)
     )
     model.summary()
     
-    # 5. Train
+    # 6. Train
     print("\n[4/4] Training...")
-    print("-"*50)
     
+    # Callback: Dừng sớm nếu không học thêm được nữa để tiết kiệm thời gian
+    early_stopping = keras.callbacks.EarlyStopping(
+        monitor='val_loss', 
+        patience=10, 
+        restore_best_weights=True
+    )
+
     history = model.fit(
         X_train, y_train,
         validation_split=0.2,
-        epochs=50,
+        epochs=100, # Tăng epoch lên vì có early stopping lo rồi
         batch_size=16,
+        callbacks=[early_stopping],
         verbose=1
     )
     
-    # 6. Evaluate
+    # 7. Evaluate
     print("\n" + "="*50)
     print("EVALUATION")
     print("="*50)
     
     test_loss, test_acc = model.evaluate(X_test, y_test, verbose=0)
     print(f"Test Accuracy: {test_acc*100:.2f}%")
-    print(f"Test Loss: {test_loss:.4f}")
-    
-    # 7. Per-class accuracy
-    print("\n" + "="*50)
-    print("PER-CLASS ACCURACY")
-    print("="*50)
-    
-    y_pred = np.argmax(model.predict(X_test), axis=1)
-    
-    for i, sign in enumerate(label_encoder.classes_):
-        mask = y_test == i
-        if mask.sum() > 0:
-            acc = (y_pred[mask] == y_test[mask]).mean()
-            print(f"{sign:15s}: {acc*100:.1f}%")
     
     # 8. Save
-    os.makedirs('models', exist_ok=True)
-    model.save('models/vsl_model.h5')
-    np.save('models/label_encoder.npy', label_encoder.classes_)
+    os.makedirs(models_dir, exist_ok=True)
+    model_save_path = os.path.join(models_dir, 'vsl_model.h5')
+    encoder_save_path = os.path.join(models_dir, 'label_encoder.npy')
     
-    print("\n✓ Model saved: models/vsl_model.h5")
-    print("✓ Labels saved: models/label_encoder.npy")
+    model.save(model_save_path)
+    np.save(encoder_save_path, classes)
+    
+    print(f"\n✓ Model saved: {model_save_path}")
+    print(f"✓ Labels saved: {encoder_save_path}")
     
     print("\n" + "="*50)
     print("TRAINING COMPLETE!")
     print("="*50)
-    print("\nNext: Run 'python src\\test_realtime.py' to test!")
 
 if __name__ == '__main__':
     main()

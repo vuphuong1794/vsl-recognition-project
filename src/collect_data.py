@@ -11,6 +11,8 @@ import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
+from src.auto_collect_data import VSLAutoCollector
+
 class VSLDataCollector:
     def __init__(self, output_dir='data/raw'):
         self.output_dir = output_dir
@@ -241,12 +243,14 @@ class VSLDataCollector:
         print(f"✓ Metadata saved: {metadata_path}")
 
 def main():
-    collector = VSLDataCollector(output_dir='../data/raw')
+    collector = VSLAutoCollector(output_dir='../data/raw')
     
     signs = [
         'xin_chao',
         'cam_on',
         'i_love_you',
+        'buoi_sang',
+        'vui_ve',
     ]
     
     print("\n" + "="*60)
