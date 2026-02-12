@@ -11,10 +11,11 @@ import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
-from src.auto_collect_data import VSLAutoCollector
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+RAW_DATA_DIR = os.path.join(BASE_DIR, '..', 'data', 'raw')
 
 class VSLDataCollector:
-    def __init__(self, output_dir='data/raw'):
+    def __init__(self, output_dir=RAW_DATA_DIR):
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
         
@@ -120,7 +121,7 @@ class VSLDataCollector:
     
     def collect_sign(self, sign_name, num_samples=30, sequence_length=30):
         """Collect data for one sign"""
-        cap = cv2.VideoCapture(0)
+        cap = cv2.VideoCapture(1)
         
         if not cap.isOpened():
             print(" Cannot open camera!")
@@ -243,15 +244,14 @@ class VSLDataCollector:
         print(f"✓ Metadata saved: {metadata_path}")
 
 def main():
-    collector = VSLAutoCollector(output_dir='../data/raw')
+    collector = VSLDataCollector()
     
-    signs = [
-        'xin_chao',
-        'cam_on',
-        'i_love_you',
-        'buoi_sang',
-        'vui_ve',
-    ]
+    signs = []
+    while True:
+        sign = input("Nhập tên sign (Enter để kết thúc): ").strip()
+        if sign == "":
+            break
+        signs.append(sign)
     
     print("\n" + "="*60)
     print("VSL DATA COLLECTION TOOL")

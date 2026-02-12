@@ -153,7 +153,7 @@ class VSLTester:
     
     def run(self):
         """Run real-time test"""
-        cap = cv2.VideoCapture(0)
+        cap = cv2.VideoCapture(1)
         
         if not cap.isOpened():
             print("❌ Cannot open camera!")
