@@ -9,6 +9,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 import os
 import glob
+from keras.callbacks import EarlyStopping
+
 import json
 
 def load_data(dataset_dir='../data/raw'):
@@ -44,7 +46,9 @@ def build_model(sequence_length, n_features, n_classes):
     """Build simple LSTM model"""
     model = keras.Sequential([
         keras.layers.LSTM(64, input_shape=(sequence_length, n_features)),
+        # Giảm overfitting (tắt ngẫu nhiên 30% neuron)
         keras.layers.Dropout(0.3),
+        # Fully Connected để học quan hệ phi tuyến
         keras.layers.Dense(32, activation='relu'),
         keras.layers.Dense(n_classes, activation='softmax')
     ])
@@ -67,13 +71,14 @@ def main():
     X, y = load_data(dataset_dir='../data/raw')
     print(f"✓ Loaded {len(X)} samples")
     
-    # 2. Encode labels
+    # 2. mã hóa nhãn thành số 0 1 2
     print("\n[2/4] Encoding labels...")
     label_encoder = LabelEncoder()
     y_encoded = label_encoder.fit_transform(y)
+
     print(f"✓ Classes: {label_encoder.classes_}")
     
-    # 3. Split data
+    # 3. chia data 80 20 và điều lớp
     X_train, X_test, y_train, y_test = train_test_split(
         X, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded
     )
@@ -90,21 +95,26 @@ def main():
     
     # 5. Train
     print("\n[4/4] Training...")
-    print("-"*50)
-    
+    print("-"*100)
+    early_stop = EarlyStopping(
+        monitor='val_loss',
+        patience=5,
+        restore_best_weights=True
+)
     history = model.fit(
         X_train, y_train,
         validation_split=0.2,
-        epochs=50,
+        epochs=100,
         batch_size=16,
-        verbose=1
+        verbose=1,
+        callbacks=[early_stop]
     )
     
     # 6. Evaluate
     print("\n" + "="*50)
     print("EVALUATION")
     print("="*50)
-    
+    #  Độ chính xác trên dữ liệu chưa từng thấy
     test_loss, test_acc = model.evaluate(X_test, y_test, verbose=0)
     print(f"Test Accuracy: {test_acc*100:.2f}%")
     print(f"Test Loss: {test_loss:.4f}")
@@ -113,9 +123,9 @@ def main():
     print("\n" + "="*50)
     print("PER-CLASS ACCURACY")
     print("="*50)
-    
+    # Lấy class có xác suất cao nhất
     y_pred = np.argmax(model.predict(X_test), axis=1)
-    
+    # Model nhận diện MỖI DẤU tốt tới mức nào
     for i, sign in enumerate(label_encoder.classes_):
         mask = y_test == i
         if mask.sum() > 0:

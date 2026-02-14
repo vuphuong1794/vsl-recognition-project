@@ -156,7 +156,7 @@ class VSLTester:
         cap = cv2.VideoCapture(0)
         
         if not cap.isOpened():
-            print("❌ Cannot open camera!")
+            print(" Cannot open camera!")
             return
         
         print("\n" + "="*50)

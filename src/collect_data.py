@@ -32,11 +32,12 @@ class VSLDataCollector:
         options = vision.HandLandmarkerOptions(
             base_options=base_options,
             num_hands=2,
+            # độ nhập diện bàn tay thấp hơn .5 thì bỏ
             min_hand_detection_confidence=0.5,
             min_hand_presence_confidence=0.5,
             min_tracking_confidence=0.5
         )
-        
+        # tạo object nhận diện tay
         self.detector = vision.HandLandmarker.create_from_options(options)
         
         # Metadata
@@ -46,11 +47,11 @@ class VSLDataCollector:
         }
         
         print("✓ MediaPipe 0.10.32 initialized with Task API")
-        
+    # biến output mediapipe thành vector số
     def extract_keypoints(self, detection_result):
         """Extract 126 features from detection result"""
         keypoints = []
-        
+        # Lấy toàn bộ tọa độ các điểm
         if detection_result.hand_landmarks:
             for hand_landmarks in detection_result.hand_landmarks:
                 for landmark in hand_landmarks:
@@ -65,7 +66,8 @@ class VSLDataCollector:
         return keypoints[:126]
     
     def normalize_keypoints(self, keypoints):
-        """Normalize relative to wrist"""
+        """chuẩn hóa cị trí không phụ thuộc camera gần xa"""
+        # chuyển từ 126 thành 3 cột mảng (xyz)
         keypoints = np.array(keypoints).reshape(-1, 3)
         
         for hand_idx in range(2):
@@ -74,14 +76,15 @@ class VSLDataCollector:
             hand_kps = keypoints[start_idx:end_idx]
             
             if np.sum(hand_kps) != 0:
+                # lấy cổ tay làm mốc trung tâm
                 wrist = hand_kps[0].copy()
                 hand_kps = hand_kps - wrist
                 keypoints[start_idx:end_idx] = hand_kps
-        
+        # trải thành ma trận thành dạng 1 chiều 
         return keypoints.flatten().tolist()
     
     def draw_landmarks(self, frame, detection_result):
-        """Draw hand landmarks on frame"""
+        """vẽ chấm và xương lên UI"""
         if not detection_result.hand_landmarks:
             return frame
         
@@ -123,7 +126,7 @@ class VSLDataCollector:
         if not cap.isOpened():
             print(" Cannot open camera!")
             return 0
-        
+        # lưu file
         sign_dir = os.path.join(self.output_dir, sign_name)
         os.makedirs(sign_dir, exist_ok=True)
         
@@ -140,7 +143,7 @@ class VSLDataCollector:
         print("- Perform the sign for 1 second")
         print("- Press 'Q' to QUIT")
         print(f"- Progress: {sample_count}/{num_samples}\n")
-        
+        # mỗi vòng 1 frame webcam
         while sample_count < num_samples:
             ret, frame = cap.read()
             if not ret:
@@ -194,13 +197,13 @@ class VSLDataCollector:
             
             # Collect keypoints
             if recording:
-                keypoints = self.extract_keypoints(detection_result)
-                keypoints = self.normalize_keypoints(keypoints)
-                sequence.append(keypoints)
+                keypoints = self.extract_keypoints(detection_result)# Trích xuất tọa độ thô (126 số)
+                keypoints = self.normalize_keypoints(keypoints)# Chuẩn hóa về gốc (0,0,0)
+                sequence.append(keypoints)# Thêm tọa độ frame này vào giỏ.
                 
                 if len(sequence) >= sequence_length:
                     sample_path = os.path.join(sign_dir, f'sample_{sample_count:03d}.npy')
-                    np.save(sample_path, np.array(sequence))
+                    np.save(sample_path, np.array(sequence))# Lưu thành file nhị phân .npy để máy học sau này.
                     
                     sample_count += 1
                     sequence = []
