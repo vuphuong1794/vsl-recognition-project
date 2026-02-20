@@ -19,8 +19,8 @@ import time
 from datetime import datetime
 
 def load_data(dataset_dir):
-    """Load data bằng cách quét toàn bộ thư mục"""
-    X, y = [], []
+    """Load data và tự động lọc các file sai kích thước"""
+    X_temp, y_temp = [], []
     
     print(f"📂 Đang quét data tại: {dataset_dir}")
     
@@ -34,36 +34,46 @@ def load_data(dataset_dir):
         print("❌ Không tìm thấy folder nào trong data/raw!")
         return np.array([]), np.array([])
 
-    print(f"🔍 Tìm thấy {len(folders)} thư mục nhãn: {folders}")
+    # Bước 1: Quét toàn bộ để thống kê shape phổ biến nhất
+    shape_counter = {}
+    valid_files = []
 
-    count_per_label = {}
-
+    print("🔍 Đang phân tích cấu trúc dữ liệu...")
     for sign_name in folders:
         sign_path = os.path.join(dataset_dir, sign_name)
         sample_files = glob.glob(os.path.join(sign_path, '*.npy'))
         
-        if len(sample_files) == 0:
-            print(f"⚠️ Cảnh báo: Folder '{sign_name}' bị rỗng, bỏ qua.")
-            continue
-            
-        for sample_file in sample_files:
+        for f in sample_files:
             try:
-                sequence = np.load(sample_file)
-                if sequence.shape == (30, 126): 
-                    X.append(sequence)
-                    y.append(sign_name)
-                else:
-                    print(f"⚠️ Bỏ qua file lỗi shape {sequence.shape}: {sample_file}")
-            except Exception as e:
-                print(f"❌ Lỗi đọc file {sample_file}: {e}")
+                seq = np.load(f)
+                shape = seq.shape
+                # Chỉ quan tâm sequence length = 30
+                if shape[0] == 30:
+                    if shape not in shape_counter:
+                        shape_counter[shape] = 0
+                    shape_counter[shape] += 1
+                    valid_files.append((f, sign_name, seq))
+            except:
+                pass
 
-        count_per_label[sign_name] = len(sample_files)
+    if not shape_counter:
+        print("❌ Không tìm thấy file data hợp lệ (len=30)!")
+        return np.array([]), np.array([])
 
-    print("\n📊 Thống kê dữ liệu:")
-    for label, count in count_per_label.items():
-        print(f"   - {label}: {count} mẫu")
+    # Tìm shape phổ biến nhất (ví dụ: (30, 1659) cho Holistic hoặc (30, 126) cho Hand)
+    target_shape = max(shape_counter, key=shape_counter.get)
+    print(f"✅ Shape chuẩn được chọn: {target_shape} (chiếm {shape_counter[target_shape]} mẫu)")
+    
+    if len(shape_counter) > 1:
+        print(f"⚠️ Cảnh báo: Phát hiện dữ liệu lẫn lộn {shape_counter}. Đang lọc bỏ dữ liệu rác...")
 
-    return np.array(X), np.array(y)
+    # Bước 2: Chỉ lấy data đúng target_shape
+    for f_path, label, seq in valid_files:
+        if seq.shape == target_shape:
+            X_temp.append(seq)
+            y_temp.append(label)
+    
+    return np.array(X_temp), np.array(y_temp)
 
 
 # ============ ĐỊNH NGHĨA CÁC MÔ HÌNH ============

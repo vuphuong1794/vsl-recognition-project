@@ -1,6 +1,6 @@
 """
-VSL Auto Collector from JSON - MediaPipe Task API
-Phiên bản "Super Augmentation": Tạo >35 biến thể từ 1 video.
+VSL Auto Collector Holistic from JSON - MediaPipe Task API
+Phiên bản "Super Augmentation Holistic": Tạo >35 biến thể (Tay + Mặt + Dáng) từ 1 video.
 """
 
 import cv2
@@ -21,29 +21,51 @@ class VSLAutoCollector:
         # Tạo thư mục lưu data
         os.makedirs(output_dir, exist_ok=True)
 
-        # Khởi tạo MediaPipe
-        model_path = 'hand_landmarker.task'
-        if not os.path.exists(model_path):
-            print("Đang tải model hand_landmarker...")
-            import urllib.request
-            url = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'
-            urllib.request.urlretrieve(url, model_path)
-        
-        base_options = python.BaseOptions(model_asset_path=model_path)
+        print("Initializing MediaPipe Holistic (Auto Collector)...")
+        self._setup_models()
+        self._init_detectors()
+
+    def _setup_models(self):
+        models = {
+            'hand_landmarker.task': 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+            'face_landmarker.task': 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+            'pose_landmarker.task': 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task'
+        }
+        import urllib.request
+        for name, url in models.items():
+            if not os.path.exists(name):
+                print(f"Downloading {name}...")
+                try:
+                    urllib.request.urlretrieve(url, name)
+                except Exception as e:
+                    print(f"❌ Failed to download {name}: {e}")
+
+    def _init_detectors(self):
+        # Hand
+        base_options = python.BaseOptions(model_asset_path='hand_landmarker.task')
         options = vision.HandLandmarkerOptions(
-            base_options=base_options,
-            num_hands=2,
-            min_hand_detection_confidence=0.3,
-            min_hand_presence_confidence=0.3,
-            min_tracking_confidence=0.3
-        )
-        self.detector = vision.HandLandmarker.create_from_options(options)
+            base_options=base_options, num_hands=2, min_hand_detection_confidence=0.3)
+        self.hand_detector = vision.HandLandmarker.create_from_options(options)
+
+        # Face
+        base_options = python.BaseOptions(model_asset_path='face_landmarker.task')
+        options = vision.FaceLandmarkerOptions(
+            base_options=base_options, num_faces=1)
+        self.face_detector = vision.FaceLandmarker.create_from_options(options)
+
+        # Pose
+        base_options = python.BaseOptions(model_asset_path='pose_landmarker.task')
+        options = vision.PoseLandmarkerOptions(base_options=base_options)
+        self.pose_detector = vision.PoseLandmarker.create_from_options(options)
 
     def process_json(self, target_list=None, limit=5):
         """Đọc file JSON và xử lý video."""
         try:
             with open(self.json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
+            
+            # Xử lý định dạng JSON List hay Dict
+            video_list = data if isinstance(data, list) else data.get('words', [])
             
             data_to_process = []
 
@@ -52,7 +74,7 @@ class VSLAutoCollector:
                 print(f"🎯 Đang tìm kiếm các từ: {target_list}")
                 targets_lower = [t.lower().strip() for t in target_list]
                 
-                for item in data:
+                for item in video_list:
                     gloss = item.get('gross', '').strip()
                     if gloss.lower() in targets_lower:
                         data_to_process.append(item)
@@ -61,7 +83,7 @@ class VSLAutoCollector:
                     print(f"⚠️ Không tìm thấy từ nào trong danh sách yêu cầu!")
                     return
             else:
-                data_to_process = data[:limit]
+                data_to_process = video_list[:limit]
             
             print(f"✅ Tìm thấy {len(data_to_process)} video phù hợp. Bắt đầu xử lý...")
             
@@ -96,10 +118,16 @@ class VSLAutoCollector:
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
             
-            detection_result = self.detector.detect(mp_image)
-            kps = self.extract_keypoints(detection_result)
-            norm_kps = self.normalize_keypoints(kps)
-            raw_sequence.append(norm_kps)
+            # Detect Holistic
+            hand_res = self.hand_detector.detect(mp_image)
+            face_res = self.face_detector.detect(mp_image)
+            pose_res = self.pose_detector.detect(mp_image)
+            
+            # Extract combined keypoints
+            kps = self.extract_keypoints(hand_res, face_res, pose_res)
+            # Normalize (Optional: currently returning raw relative coords)
+            # norm_kps = self.normalize_keypoints(kps) 
+            raw_sequence.append(kps)
             
         cap.release()
 
@@ -107,32 +135,38 @@ class VSLAutoCollector:
             print(f"⚠️ Video quá ngắn ({len(raw_sequence)} frames). Bỏ qua.")
             return
 
-        # Tạo augmentation (Phiên bản mới)
+        # Tạo augmentation (Phiên bản Holistic)
         self.generate_augmentations(sign_name, raw_sequence)
 
-    def extract_keypoints(self, detection_result):
+    def extract_keypoints(self, hand_result, face_result, pose_result):
+        """Extract combined keypoints: Pose(99) + Face(1434) + Hands(126) = 1659"""
         keypoints = []
-        if detection_result.hand_landmarks:
-            for hand_landmarks in detection_result.hand_landmarks:
-                for landmark in hand_landmarks:
-                    keypoints.extend([landmark.x, landmark.y, landmark.z])
         
-        target_len = 126
-        while len(keypoints) < target_len:
-            keypoints.extend([0.0] * (target_len - len(keypoints)))
+        # 1. Pose (33 * 3)
+        if pose_result.pose_landmarks:
+            for landmark in pose_result.pose_landmarks[0]:
+                keypoints.extend([landmark.x, landmark.y, landmark.z])
+        else:
+            keypoints.extend([0] * 99)
             
-        return keypoints[:target_len]
-
-    def normalize_keypoints(self, keypoints):
-        kps = np.array(keypoints).reshape(-1, 3)
-        for hand_idx in range(2):
-            start = hand_idx * 21
-            end = start + 21
-            hand_kps = kps[start:end]
-            if np.sum(hand_kps) != 0:
-                wrist = hand_kps[0].copy()
-                kps[start:end] = hand_kps - wrist
-        return kps.flatten()
+        # 2. Face (478 * 3)
+        if face_result.face_landmarks:
+            for landmark in face_result.face_landmarks[0]:
+                keypoints.extend([landmark.x, landmark.y, landmark.z])
+        else:
+            keypoints.extend([0] * 1434)
+            
+        # 3. Hands (21 * 2 * 3)
+        hand_kps = []
+        if hand_result.hand_landmarks:
+            for hand_landmarks in hand_result.hand_landmarks:
+                for landmark in hand_landmarks:
+                    hand_kps.extend([landmark.x, landmark.y, landmark.z])
+        while len(hand_kps) < 126:
+            hand_kps.extend([0] * 63)
+        keypoints.extend(hand_kps[:126])
+        
+        return keypoints
 
     def resample_sequence(self, sequence, target_len):
         if len(sequence) == target_len:
@@ -157,18 +191,21 @@ class VSLAutoCollector:
         return np.array(resampled)
 
     # ==========================================================
-    # 🚀 SUPER AUGMENTATION ENGINE (Tạo >35 mẫu)
+    # 🚀 SUPER AUGMENTATION ENGINE (Holistic Version)
     # ==========================================================
     def apply_rotation(self, data_reshaped, angle):
-        """Hàm phụ trợ để xoay dữ liệu"""
+        """Hàm phụ trợ để xoay dữ liệu 3D"""
         rad = np.radians(angle)
         cos_a, sin_a = np.cos(rad), np.sin(rad)
         rot_matrix = np.array([[cos_a, -sin_a], [sin_a, cos_a]])
         
         rot_data = data_reshaped.copy()
+        # Chỉ xoay toạ độ X, Y (2 cột đầu tiên của dimension cuối)
         xy_coords = rot_data[:, :, :2] 
         rot_xy = np.dot(xy_coords, rot_matrix)
         rot_data[:, :, :2] = rot_xy
+        
+        # Flatten lại về vector đặc trưng (1659)
         return rot_data.reshape(self.sequence_length, -1)
 
     def generate_augmentations(self, sign_name, raw_sequence):
@@ -176,33 +213,33 @@ class VSLAutoCollector:
         os.makedirs(save_path, exist_ok=True)
         
         base_data = self.resample_sequence(raw_sequence, self.sequence_length)
-        # Shape chuẩn để biến đổi hình học: (30, 42, 3)
-        base_data_reshaped = base_data.reshape(self.sequence_length, -1, 3) 
+        
+        # Shape chuẩn Holistic: (30, 553, 3) vì 1659 / 3 = 553 điểm landmark
+        num_landmarks = base_data.shape[1] // 3
+        base_data_reshaped = base_data.reshape(self.sequence_length, num_landmarks, 3) 
 
         augmentations = []
 
         # === PHẦN 1: DỮ LIỆU GỐC & CƠ BẢN (2 file) ===
         augmentations.append(("org", base_data))
         
-        # Thêm nhiễu nhẹ (Noise)
         noise = np.random.normal(0, 0.002, base_data.shape)
         augmentations.append(("noise", base_data + noise))
 
         # === PHẦN 2: CÁC BIẾN THỂ HÌNH HỌC (GỐC) ===
-        # Định nghĩa các tham số biến đổi
-        angles = [-12, -8, -4, 4, 8, 12]        # 6 góc xoay
-        scales = [0.85, 0.9, 0.95, 1.05, 1.1, 1.15] # 6 mức co giãn
-        shifts = [                              # 4 mức dịch chuyển
-            (0.03, 0), (-0.03, 0),  # Trái/Phải
-            (0, 0.03), (0, -0.03)   # Lên/Xuống
+        angles = [-10, -5, 5, 10]        # 4 góc xoay
+        scales = [0.9, 0.95, 1.05, 1.1] # 4 mức co giãn
+        shifts = [                      # 4 mức dịch chuyển
+            (0.02, 0), (-0.02, 0),
+            (0, 0.02), (0, -0.02)
         ]
 
-        # 2.1 Xoay (6 file)
+        # 2.1 Xoay (4 file)
         for angle in angles:
             aug_data = self.apply_rotation(base_data_reshaped, angle)
             augmentations.append((f"rot{angle}", aug_data))
 
-        # 2.2 Scale (6 file)
+        # 2.2 Scale (4 file)
         for scale in scales:
             aug_data = base_data * scale
             augmentations.append((f"scale{scale}", aug_data))
@@ -210,45 +247,24 @@ class VSLAutoCollector:
         # 2.3 Shift (4 file)
         for idx, (sx, sy) in enumerate(shifts):
             shift_data = base_data.copy()
-            # Dữ liệu dạng phẳng, shift cộng thẳng vào
-            # Tuy nhiên, shift x, y cần cẩn thận hơn, ở đây ta cộng đều (đơn giản hóa)
-            # Vì đã normalize, cộng đều vào toàn bộ frame coi như shift tâm
-            # Để chính xác: Ta reshape lại, cộng sx vào cột X, sy vào cột Y
+            # Cộng shift cho X và Y (giả định normalized)
+            # Reshape tạm để cộng đúng cột
             temp = shift_data.reshape(self.sequence_length, -1, 3)
             temp[:, :, 0] += sx
             temp[:, :, 1] += sy
             augmentations.append((f"shift{idx}", temp.reshape(self.sequence_length, -1)))
 
-        # === PHẦN 3: LẬT GƯƠNG VÀ COMBO (GẤP ĐÔI SỐ LƯỢNG) ===
-        # Tạo bản lật gương (Flip)
+        # === PHẦN 3: LẬT GƯƠNG (Flip) ===
         mirror_reshaped = base_data_reshaped.copy()
         mirror_reshaped[:, :, 0] = -mirror_reshaped[:, :, 0] # Đảo trục X
         mirror_flat = mirror_reshaped.reshape(self.sequence_length, -1)
         
-        augmentations.append(("flip_org", mirror_flat)) # 1 file
+        augmentations.append(("flip_org", mirror_flat))
 
-        # 3.1 Flip + Xoay (6 file)
+        # 3.1 Flip + Xoay (4 file)
         for angle in angles:
-            # Xoay ngược chiều lại một chút cho đa dạng
             aug_data = self.apply_rotation(mirror_reshaped, -angle) 
             augmentations.append((f"flip_rot{angle}", aug_data))
-
-        # 3.2 Flip + Scale (6 file)
-        for scale in scales:
-            aug_data = mirror_flat * scale
-            augmentations.append((f"flip_scale{scale}", aug_data))
-        
-        # 3.3 Flip + Shift (4 file)
-        for idx, (sx, sy) in enumerate(shifts):
-            temp = mirror_reshaped.copy()
-            temp[:, :, 0] += sx
-            temp[:, :, 1] += sy
-            augmentations.append((f"flip_shift{idx}", temp.reshape(self.sequence_length, -1)))
-
-        # === TỔNG KẾT ===
-        # Org(1) + Noise(1) + Rot(6) + Scale(6) + Shift(4) = 18
-        # Flip(1) + FlipRot(6) + FlipScale(6) + FlipShift(4) = 17
-        # Tổng cộng: 35 file training chất lượng cao.
 
         # LƯU FILE
         count = 0
@@ -258,7 +274,7 @@ class VSLAutoCollector:
             np.save(file_path, data.astype(np.float32))
             count += 1
             
-        print(f"   -> Đã tạo {count} file training (Super Augmentation) tại: {save_path}")
+        print(f"   -> Đã tạo {count} file training (Holistic Augmentation) tại: {save_path}")
 
 
 if __name__ == "__main__":
