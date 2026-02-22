@@ -127,7 +127,15 @@ class VSLDataCollector:
         
         return keypoints
     
-
+    def normalize_keypoints(self, keypoints):
+        """
+        Normalize keypoints.
+        Structure: [Pose(99) | Face(1434) | Hands(126)]
+        """
+        # TODO: Implement sophisticated normalization (e.g., centering face/pose)
+        # For now, we return raw/relative coordinates as extracted (already normalized 0-1 by MediaPipe)
+        # Exception: Z-coordinates in MediaPipe are not 0-1, they are relative depth.
+        return keypoints # Returning flattened list
     
     def draw_landmarks(self, frame, hand_result, face_result, pose_result):
         h, w, _ = frame.shape
