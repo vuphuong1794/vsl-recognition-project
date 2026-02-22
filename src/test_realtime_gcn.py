@@ -205,16 +205,35 @@ class VSLGCNTester:
             conf = 0.0
             
             if len(self.buffer) == 30:
-                # Prepare input for GCN
-                gcn_input = self.preprocess_for_gcn(self.buffer)
+                # Trong test_realtime_gcn.py
+                seq_array = np.array(self.buffer)
+                # Tính độ lệch chuẩn của tọa độ cổ tay/bàn tay trong 30 frame
+                motion_variance = np.var(seq_array[:, 1533:1659]) 
                 
-                # Predict
-                pred = self.model.predict(gcn_input, verbose=0)[0]
-                conf = np.max(pred)
-                idx = np.argmax(pred)
-                
-                if conf > 0.7: # Ngưỡng tin cậy cao hơn cho GCN
-                    sign = self.labels[idx]
+                if motion_variance > 0.0005: # Chỉ dự đoán khi tay có chuyển động
+                    gcn_input = self.preprocess_for_gcn(self.buffer)
+                    pred = self.model.predict(gcn_input, verbose=0)[0]
+                    
+                    # Prepare input for GCN
+                    gcn_input = self.preprocess_for_gcn(self.buffer)
+                    
+                    # Predict
+                    pred = self.model.predict(gcn_input, verbose=0)[0]
+                    
+                    # Debug: In ra top 3
+                    top_indices = np.argsort(pred)[-3:][::-1]
+                    print(f"\rTop 3: ", end="")
+                    for i in top_indices:
+                        print(f"{self.labels[i]}: {pred[i]:.2f} | ", end="")
+                    
+                    conf = np.max(pred)
+                    idx = np.argmax(pred)
+                    
+                    # Giảm ngưỡng xuống 0.5 để dễ test hơn
+                    if conf > 0.5: 
+                        sign = self.labels[idx]
+                else:
+                    sign = "Đang chờ hành động..."
             
             # UI
             cv2.rectangle(frame, (0, 0), (400, 100), (0, 0, 0), -1)

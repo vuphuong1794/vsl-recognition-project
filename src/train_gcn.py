@@ -104,10 +104,12 @@ class GraphConv(layers.Layer):
         self.in_channels = input_shape[3]
         
         # Learnable Adjacency Matrix (A) size (Node, Node)
+        # Trong train_gcn.py, class GraphConv
         self.A = self.add_weight(
             name="adjacency_matrix",
             shape=(self.nodes, self.nodes),
             initializer="uniform",
+            regularizer=keras.regularizers.l2(0.01), # ÉP MÔ HÌNH KHÔNG HỌC VẸT
             trainable=True
         )
         

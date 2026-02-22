@@ -108,8 +108,6 @@ class VSLTester:
         
         return keypoints
     
-    def normalize_keypoints(self, keypoints):
-        return keypoints # Raw for now to match collector
     
     def draw_landmarks(self, frame, hand_result, face_result, pose_result):
         h, w, _ = frame.shape

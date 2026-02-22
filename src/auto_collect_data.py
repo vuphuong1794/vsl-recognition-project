@@ -126,7 +126,7 @@ class VSLAutoCollector:
             # Extract combined keypoints
             kps = self.extract_keypoints(hand_res, face_res, pose_res)
             # Normalize (Optional: currently returning raw relative coords)
-            # norm_kps = self.normalize_keypoints(kps) 
+            norm_kps = self.normalize_keypoints(kps) 
             raw_sequence.append(kps)
             
         cap.release()
