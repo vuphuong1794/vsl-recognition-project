@@ -170,11 +170,8 @@ class VSLTester:
         # Try camera 0 first, then 1
         cap = cv2.VideoCapture(0)
         if not cap.isOpened():
-            print("⚠️ Camera 0 failed, trying Camera 1...")
-            cap = cv2.VideoCapture(1)
-            if not cap.isOpened():
-                print("❌ Cannot open any camera!")
-                return
+            print("❌ Cannot open camera!")
+            return
         
         print("\n=== VSL HOLISTIC REAL-TIME TEST ===")
         print("Press 'Q' to quit")

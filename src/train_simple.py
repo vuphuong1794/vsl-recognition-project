@@ -12,11 +12,9 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import confusion_matrix, classification_report
 import os
 import glob
-import matplotlib.pyplot as plt
-import seaborn as sns
+from keras.callbacks import EarlyStopping
+
 import json
-import time
-from datetime import datetime
 
 def load_data(dataset_dir):
     """Load data và tự động lọc các file sai kích thước"""
@@ -576,15 +574,13 @@ def main():
         os.path.join(results_dir, 'top_confused_pairs.txt')
     )
     
-    best_model_path = os.path.join(models_dir, f'best_model_{best_model_name}.h5')
-    best_model.save(best_model_path)
-    
-    # Save all models
-    print("\n💾 Saving all models...")
-    for model, name in zip(models, model_names):
-        model_path = os.path.join(models_dir, f'{name}.h5')
-        model.save(model_path)
-        print(f"✓ Saved: {name}.h5")
+    # 7. Evaluate
+    print("\n" + "="*50)
+    print("EVALUATION")
+    print("="*50)
+    #  Độ chính xác trên dữ liệu chưa từng thấy
+    test_loss, test_acc = model.evaluate(X_test, y_test, verbose=0)
+    print(f"Test Accuracy: {test_acc*100:.2f}%")
     
     # Save labels
     np.save(os.path.join(models_dir, 'label_encoder.npy'), classes)
