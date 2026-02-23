@@ -498,6 +498,39 @@ class Augmenter:
             return data.copy()
         resampled = resample_sequence(data, new_len)
         return resample_sequence(resampled, self.seq_len)
+    
+    def _time_warp(self, data, sigma=0.15, seed=None):
+        try:
+            from scipy.interpolate import CubicSpline
+        except ImportError:
+            return data.copy()  # fallback nếu không có scipy
+        
+        if seed is not None:
+            np.random.seed(seed)
+        
+        T       = len(data)
+        n_knots = 6
+        knots   = np.linspace(0, T-1, n_knots)
+        warped  = knots + np.random.normal(0, sigma*T, n_knots)
+        warped  = np.clip(warped, 0, T-1)
+        warped[0] = 0; warped[-1] = T-1
+        
+        # Đảm bảo monotonic
+        for k in range(1, len(warped)):
+            warped[k] = max(warped[k], warped[k-1] + 0.5)
+        warped = np.clip(warped, 0, T-1)
+        
+        cs      = CubicSpline(knots, warped)
+        new_idx = np.clip(cs(np.arange(T)), 0, T-1)
+        
+        result = []
+        for i in new_idx:
+            lo = int(np.floor(i))
+            hi = min(int(np.ceil(i)), T-1)
+            w  = i - lo
+            result.append(data[lo]*(1-w) + data[hi]*w)
+        
+        return resample_sequence(np.array(result, dtype=np.float32), self.seq_len)
 
     def generate(self, base_data):
         """Tạo augmentations. Trả về list[(suffix, data)]"""
@@ -526,6 +559,9 @@ class Augmenter:
             augs.append((f'flip_rot{angle:+d}', self._rotate_coords(mirror, angle)))
         for s in [0.9, 1.1]:
             augs.append((f'flip_scl{s:.1f}', self._scale_coords(mirror, s)))
+        # Time Warp (3 biến thể)
+        for i in range(3):
+            augs.append((f'twarp{i}', self._time_warp(base_data, seed=i*13)))
 
         return augs
 
