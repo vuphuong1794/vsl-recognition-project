@@ -31,6 +31,7 @@ class Config:
     # ── Data ──
     DATA_DIR        = 'data/processed'
     LABEL_MAP_PATH  = 'data/processed/label_map.json'
+    # 30 frame
     SEQ_LEN         = 30
     FEAT_DIM        = 339 
 
@@ -42,6 +43,7 @@ class Config:
     INTERACT_START,INTERACT_END= 308, 339
 
     # ── Model ──
+    # mỗi frame sẽ được nén thành vector 256 chiều.
     D_MODEL           = 256
     SPATIAL_HEADS     = 8
     SPATIAL_LAYERS    = 3
@@ -57,10 +59,11 @@ class Config:
     # ── Training ──
     EPOCHS       = 100
     BATCH_SIZE   = 32
+    # tốc độ học
     LR           = 3e-4
     WEIGHT_DECAY = 1e-4
-    TRAIN_RATIO  = 0.8
-    VAL_RATIO    = 0.1
+    TRAIN_RATIO  = 0.8 #80% dữ liệu đùng để huấn luyện
+    VAL_RATIO    = 0.1 #10% dữ liệu dùng để kiểm tra chéo trong lúc huấn luyện
     PATIENCE     = 15
     GRAD_CLIP    = 1.0
 
@@ -75,11 +78,9 @@ class Config:
 cfg = Config()
 
 
-# ═══════════════════════════════════════════════════════════
 # DATASET
-# ═══════════════════════════════════════════════════════════
-
 class VSLDataset(Dataset):
+    # lấy dữ liệu 1 file .npy → shape (30, 339)
     def __init__(self, data_dir, label_map, augment=False):
         self.samples = []
         self.augment = augment
@@ -103,6 +104,10 @@ class VSLDataset(Dataset):
         return torch.from_numpy(data), label
 
     def _runtime_aug(self, data):
+        # Giúp model không học thuộc máy móc.
+        # Thêm noise nhỏ
+        # Random crop thời gian
+        # Nội suy lại về 30 frame
         if np.random.rand() < 0.5:
             data += np.random.normal(0, 0.002, data.shape).astype(np.float32)
         if np.random.rand() < 0.3:
@@ -122,11 +127,9 @@ class VSLDataset(Dataset):
         return data
 
 
-# ═══════════════════════════════════════════════════════════
 # POSITIONAL ENCODING
-# ═══════════════════════════════════════════════════════════
-
 class PositionalEncoding(nn.Module):
+    # gán thêm thông tin vị trí các frame để học mối quan hệ thời gian do nó học nhiều fram cùng 1 lúc
     def __init__(self, d_model, max_len=500, dropout=0.1):
         super().__init__()
         self.dropout = nn.Dropout(dropout)
@@ -143,11 +146,9 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
-# ═══════════════════════════════════════════════════════════
 # SPATIAL TRANSFORMER
-# ═══════════════════════════════════════════════════════════
-
 class SpatialTransformer(nn.Module):
+    # Xử lý trong 1 frame.
     NUM_TOKENS = 6
 
     def __init__(self, feat_dim, d_model, nhead, num_layers, ff_dim, dropout):
@@ -161,9 +162,11 @@ class SpatialTransformer(nn.Module):
             cfg.BLEND_END   - cfg.BLEND_START,
             cfg.INTERACT_END - cfg.INTERACT_START,
         ]
+        # biến nhóm được đưa qua thành vector 256 chiều
         self.group_projs = nn.ModuleList([
             nn.Linear(dim, d_model) for dim in group_dims
         ])
+        
         self.token_embed = nn.Embedding(self.NUM_TOKENS, d_model)
         enc_layer = nn.TransformerEncoderLayer(
             d_model=d_model, nhead=nhead, dim_feedforward=ff_dim,
@@ -175,6 +178,7 @@ class SpatialTransformer(nn.Module):
         self.cls_token = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)
 
     def _split_groups(self, x):
+        # Cắt vector 339 chiều thành 6 phần (Pose, Face, Hand L, Hand R, Blend, Interact).
         return [
             x[:, :, cfg.POSE_START    : cfg.POSE_END],
             x[:, :, cfg.FACE_START    : cfg.FACE_END],
@@ -185,6 +189,7 @@ class SpatialTransformer(nn.Module):
         ]
 
     def forward(self, x):
+        # Biến mỗi frame (339 features) → thành embedding 256 chiều bằng self-attention giữa các nhóm keypoint trong cùng 1 frame.
         B, T, _ = x.shape
         groups   = self._split_groups(x)
         toks     = []
@@ -215,7 +220,7 @@ class TemporalTransformer(nn.Module):
             enc_layer, num_layers=num_layers, norm=nn.LayerNorm(d_model),
         )
         self.cls_token = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)
-
+#  Nhìn toàn bộ chuỗi 30 frame và tổng hợp chúng thành 1 vector đại diện cho cả video.
     def forward(self, x):
         B   = x.size(0)
         cls = self.cls_token.expand(B, -1, -1)
@@ -229,6 +234,13 @@ class TemporalTransformer(nn.Module):
 # ═══════════════════════════════════════════════════════════
 
 class DualTransformer(nn.Module):
+    # cả hai mạng trên kết hợp và đưa ra dự đoán cuối cùng.
+    """
+    Logic dung hợp (Fusion): Tác giả kết hợp spatial_avg (trung bình cộng ý nghĩa của cả 30 frame)
+    và temporal_out (ý nghĩa chuỗi thời gian). Việc ghép (concatenate) 2 vector này lại giúp mô hình
+    vừa có cái nhìn tổng quan, vừa hiểu được sự chuyển động. Sau đó, nó đi qua mạng nơ-ron tuyến tính (classifier) 
+    để chấm điểm cho các nhãn hành động.
+    """
     def __init__(self, feat_dim, seq_len, num_classes, cfg: Config):
         super().__init__()
         d = cfg.D_MODEL
@@ -284,10 +296,16 @@ class Trainer:
         self.device       = cfg.DEVICE
         self.split_counts = split_counts
 
+        # Bộ tối ưu hóa giúp cập nhật trọng số
         self.optimizer = torch.optim.AdamW(
             model.parameters(), lr=cfg.LR, weight_decay=cfg.WEIGHT_DECAY)
+        
+        """Thuật toán giảm dần tốc độ học (Learning Rate). Lúc đầu học nhanh, 
+        lúc sau học chậm lại để tìm được điểm tối ưu chính xác nhất."""
         self.scheduler = CosineAnnealingLR(
             self.optimizer, T_max=cfg.EPOCHS, eta_min=cfg.LR * 0.01)
+        
+        "Hàm tính độ sai lệch giữa dự đoán và thực tế."
         self.criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 
         os.makedirs(cfg.CHECKPOINT_DIR, exist_ok=True)
@@ -296,9 +314,8 @@ class Trainer:
         self.best_val_acc = 0.0
         self.patience_cnt = 0
 
-        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-        self.ckpt_path = os.path.join(cfg.CHECKPOINT_DIR, f'best_{ts}.pt')
-        self.log_path  = os.path.join(cfg.LOG_DIR, f'history_{ts}.json')
+        self.ckpt_path = os.path.join(cfg.CHECKPOINT_DIR, 'best_model.pt')
+        self.log_path  = os.path.join(cfg.LOG_DIR, f'history_{ts}.json')    
 
         # ── Khởi tạo Visualizer ──
         self.viz = Visualizer(label_map, output_dir=cfg.CHART_DIR)
@@ -449,6 +466,8 @@ def load_label_map(path):
 
 
 def build_dataloaders(data_dir, label_map, cfg):
+    '''Hàm random_split kết hợp với manual_seed(42) đảm bảo rằng dù bạn có tắt máy mở lại
+      và chạy code 100 lần, thì các video được chia vào tập Train/Val/Test vẫn y hệt như lần đầu tiên.'''
     full_ds = VSLDataset(data_dir, label_map, augment=False)
     if len(full_ds) == 0:
         raise ValueError("Dataset trong! Kiem tra thu muc data/processed/")

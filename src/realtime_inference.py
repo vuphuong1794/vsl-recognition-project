@@ -868,7 +868,7 @@ def main():
                         help='So frame smoothing (mac dinh 5)')
     args = parser.parse_args()
 
-    ckpt = args.checkpoint or find_latest_checkpoint()
+    ckpt = args.checkpoint or 'checkpoints/best_model.pt'
     if ckpt is None:
         print("\n  LOI: Khong tim thay checkpoint!")
         print("  Hay train model truoc hoac chi dinh --checkpoint <path>\n")
