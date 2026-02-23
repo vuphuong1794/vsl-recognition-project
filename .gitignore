@@ -145,7 +145,21 @@ env.bak/
 venv.bak/
 data/
 
+checkpoints/
+*.pt
+*.pth
 
+# Training logs & charts (optional, tùy bạn)
+logs/
+charts/
+
+# MediaPipe model files
+*.task
+
+# Data
+data/processed/
+data/videos/
+screenshots/
 
 # Spyder project settings
 .spyderproject
