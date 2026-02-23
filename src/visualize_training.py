@@ -378,15 +378,17 @@ class Visualizer:
     # ════════════════════════════════════════════════════════════════
     def plot_roc(self, y_true, y_proba):
         n_cls = len(self.labels_list)
-        y_bin = label_binarize(y_true, classes=list(range(n_cls)))
-
+        y_bin = label_binarize(y_true, classes=list(range(len(self.labels_list))))
+        if y_bin.ndim == 1:
+            y_bin = y_bin.reshape(-1, 1)
+            y_bin = np.hstack([1 - y_bin, y_bin])
         fig, ax = plt.subplots(figsize=(8, 7))
 
         colors = plt.cm.tab20(np.linspace(0, 1, n_cls))
         fpr_all, tpr_all = [], []
-
+    
         for i in range(n_cls):
-            if y_bin[:, i].sum() == 0:
+            if i >= y_bin.shape[1] or y_bin[:, i].sum() == 0:
                 continue
             fpr, tpr, _ = roc_curve(y_bin[:, i], y_proba[:, i])
             roc_auc = auc(fpr, tpr)
@@ -426,7 +428,7 @@ class Visualizer:
             y_true     = y_true[idx]
 
         tsne = TSNE(n_components=2, perplexity=min(perplexity, len(embeddings)//4),
-                    random_state=42, n_iter=1000, init='pca')
+                    random_state=42, max_iter=1000, init='pca')
         emb2d = tsne.fit_transform(embeddings)
 
         fig, ax = plt.subplots(figsize=(9, 8))

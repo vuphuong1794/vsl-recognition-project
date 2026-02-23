@@ -339,7 +339,7 @@ class FullBodyExtractor:
             wrist = (get_xy(hand_lms[0])
                      if hand_lms is not None else np.zeros(2, dtype=np.float32))
 
-            # Ngón trỏ tip (index 8) [MỚI]
+            # Ngón trỏ tip (index 8) 
             index_tip = (get_xy(hand_lms[8])
                          if hand_lms is not None else np.zeros(2, dtype=np.float32))
 
